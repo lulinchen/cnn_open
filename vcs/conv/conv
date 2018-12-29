@@ -1,0 +1,100 @@
+#!/bin/bash
+
+WIDTH=24
+HEIGHT=24
+FILENAME=../../../../yuv-seq/1920x48/random.yuv
+NB_FRAME=4
+SUBTEST=bhvsram
+CHROMA_FORMAT_IDC=3
+
+while getopts "w:h:F:f:S:c:dn" options
+do
+    case $options in
+    w ) WIDTH=$OPTARG;;
+    h ) HEIGHT=$OPTARG;;
+	F ) FILENAME=$OPTARG;;
+    f ) NB_FRAME=$OPTARG;;
+	S ) SUBTEST=$OPTARG;;
+	c ) export CHROMA_FORMAT_IDC=$OPTARG;;
+    d ) DUMP_FSDB=true;;
+	n ) NETLIST_SIM=true;;
+    esac
+done    
+ 
+DEBUSSYDIR="/d2/novas/debussy"
+DEBUSSYPLI="-P $DEBUSSYDIR/share/PLI/vcsd$VCS_VERSION/LINUX/vcsd.tab $DEBUSSYDIR/share/PLI/vcsd$VCS_VERSION/LINUX64/pli.a +vcsd +memcbk"
+
+VCS=vcs
+INCLUDES="../../src ../../model"
+APPNAME="$(basename $0)_tb"
+
+NETSUFFIX=
+[ "$NETLIST_SIM" == true ] && NETSUFFIX="n"
+
+if [ $SUBTEST == "bhvsram" ]; then
+	INPUTFILE="$APPNAME."$NETSUFFIX"f"
+else
+	INPUTFILE="$APPNAME."$NETSUFFIX"f.$SUBTEST"
+fi
+
+COMMON_ARGS="-sverilog  +v2k -j2 -q -Vt +vcs+flush+all -timescale=1ns/1ps"
+COMMON_ARGS="$COMMON_ARGS -O4"
+
+
+DEFINES="SIMULATING"
+DEFINES="$DEFINES SIMULATION_FREQ_200MHZ"
+#DEFINES="$DEFINES WITH_ETHER_RTP_TX"
+
+[ "$CHROMA_FORMAT_IDC" == 2 ] && DEFINES="$DEFINES YUV422_ONLY"
+[ "$CHROMA_FORMAT_IDC" == 3 ] && DEFINES="$DEFINES YUV444_ONLY"
+[ "$DUMP_FSDB" == true ] && DEFINES="$DEFINES DUMP_FSDB"
+
+##################
+
+if [ -n DEFINES ]; then
+        for def in $DEFINES; do
+                DEFINE_ARGS="$DEFINE_ARGS +define+$def+"
+        done
+        for def in $DEFINES; do
+                if [ $def == "DUMP_FSDB" ]; then
+                        DEBUG_ARGS="$DEBUG_ARGS $DEBUSSYPLI"
+                fi
+        done
+fi
+
+echo "========LINT_ARGS= $LINT_ARGS==============="
+
+if [ -n INCLUDES ]; then
+	for inc in $INCLUDES; do
+		INCLUDE_ARGS="$INCLUDE_ARGS +incdir+$inc+"
+	done
+fi
+
+echo > simDefines.v
+
+echo $DEFINES
+if [ -n "$DEFINES" ]; then
+    for def in $DEFINES; do
+        DEFINE_ARGS="$DEFINE_ARGS +define+$def+"
+                echo "\`define $def" >> simDefines.v
+    done
+fi
+
+
+PWD=`pwd`
+TMP_UYVY=~/tmp/jpeg.uyvy.`whoami`${PWD//\//.}
+
+INTERLACE=0
+
+#YUVCMDLINE="../../c/tools/yuv_to_cam_input.py $FILENAME $TMP_UYVY $WIDTH $HEIGHT $NB_FRAME $INTERLACE $CHROMA_FORMAT_IDC"
+#echo $YUVCMDLINE
+#$YUVCMDLINE
+
+PARAMS="+width=$WIDTH +height=$HEIGHT +frames=$NB_FRAME +input=$FILENAME +inputuyvy=$TMP_UYVY"
+
+echo $INPUTFILE
+
+$VCS  +lint=TFIPC-L  +vcsd  -full64 -o  simv.$APPNAME $COMMON_ARGS $LINT_ARGS $DEFINE_ARGS $DEBUG_ARGS $LIB_ARGS $INCLUDE_ARGS -q -f $INPUTFILE
+./simv.$APPNAME $PARAMS
+
+exit $?
